@@ -18,7 +18,7 @@ Requirements = (Target.HasCHTCStaging == true)
 
 +wantGPULab = true
 
-transfer_input_files = run_main_experiment.sh, ../../api_keys.txt, ../experiments, ../models/, ../utils, pelican://chtc.wisc.edu/researchdrive/dbhaskar3/CHTC/LEAP_c_ECT/Letter-high.tar
+transfer_input_files = run_main_experiment.sh, ../../api_keys.txt, ../experiments, ../models, ../utils, pelican://chtc.wisc.edu/researchdrive/dbhaskar3/CHTC/LEAP_c_ECT/Letter-high.tar
 
 #transfer_output_files = out.txt
 #transfer_output_remaps = "out.txt = file:///staging/groups/bhaskar_group/out.txt"
