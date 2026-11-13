@@ -97,7 +97,7 @@ class BaseLineModel(torch.nn.Module):
     def forward(self, data):
         if self.name == "SYN":
             return torch.nn.functional.log_softmax(self.model(data), dim=-1)
-        elif self.name == "GCNwithclECTallSteps":
+        elif self.name == "GNNclECT":
             return torch.nn.functional.log_softmax(self.model(data), dim=-1)
         x, e_index = data.x, data.edge_index
         x_ect = None

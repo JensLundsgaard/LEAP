@@ -5,20 +5,6 @@ import torch
 import torch.nn as nn
 from dect.nn import ECTConfig, ECTLayer
 
-from utils.continuous_delta_ect import compute_continuous_delta_ect_edges # from Blaser et al.
-
-class ContinuousECTWrapper(nn.Module): # wrap ect layer so it can stand in place of ECTLayer
-    def __init__(self):
-        super().__init__():
-    def forward(self, batch):
-        return compute_continuous_delta_ect_edges( \
-            batch.x, \
-            batch.edge_index, \
-            batch.v, \
-            faces=None if not hasattr(batch, "faces") else batch.get("faces",None), \
-            index=batch.index)
-
-
 from models.ECTProjections import (
     Conv1dEquivariant,
     DeepSets,
@@ -42,8 +28,6 @@ class BaseGraphModel(nn.Module, ABC):
     use_pos_enc: bool
     pos_enc_embed_dim: Optional[int]
     use_ect: bool
-    use_c_ect: bool
-    use_max_node_bfs_search: bool # if not use 
     ect_on_pe: Optional[bool]
     ect_embed_dim: Optional[bool]
     ect_directions: Optional[torch.Tensor]
