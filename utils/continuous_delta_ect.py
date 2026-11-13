@@ -1,7 +1,7 @@
 """
 Author: Nello Blaser
 
-As part of Encoding the Euler Characteristic Transform (2026, arXiv) by Blaser et al. 
+As part of *Encoding the Euler Characteristic Transform* (2026, arXiv) by Blaser et al. 
 
 All credit where credit is due.
 

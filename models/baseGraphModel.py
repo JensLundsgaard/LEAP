@@ -5,6 +5,20 @@ import torch
 import torch.nn as nn
 from dect.nn import ECTConfig, ECTLayer
 
+from utils.continuous_delta_ect import compute_continuous_delta_ect_edges # from Blaser et al.
+
+class ContinuousECTWrapper(nn.Module): # wrap ect layer so it can stand in place of ECTLayer
+    def __init__(self):
+        super().__init__():
+    def forward(self, batch):
+        return compute_continuous_delta_ect_edges( \
+            batch.x, \
+            batch.edge_index, \
+            batch.v, \
+            faces=None if not hasattr(batch, "faces") else batch.get("faces",None), \
+            index=batch.index)
+
+
 from models.ECTProjections import (
     Conv1dEquivariant,
     DeepSets,
@@ -28,6 +42,8 @@ class BaseGraphModel(nn.Module, ABC):
     use_pos_enc: bool
     pos_enc_embed_dim: Optional[int]
     use_ect: bool
+    use_c_ect: bool
+    use_max_node_bfs_search: bool # if not use 
     ect_on_pe: Optional[bool]
     ect_embed_dim: Optional[bool]
     ect_directions: Optional[torch.Tensor]
@@ -105,21 +121,27 @@ class BaseGraphModel(nn.Module, ABC):
             self._print(
                 f'l-ECT directions are {"learnable" if self.learn_directions else "fixed"}'
             )
-
-            self.ect_config = ECTConfig(
-                ect_type=self.ect_type,
-                resolution=self.ect_resolution,
-                scale=self.ect_scale,
-                radius=self.ect_radius,
-                normalized=self.ect_normalize_after,
-                fixed=not self.learn_directions,
-            )
-            self.ect_layer = torch.nn.ModuleList(
-                [
-                    ECTLayer(self.ect_config, v=self.ect_directions)
-                    for _ in self.ect_hops
-                ]
-            )
+            if self.use_c_ect:
+                self.ect_layer = torch.nn.ModuleList(
+                    [
+                        ContinuousECTWrapper() for _ in self.ect_hops
+                    ]
+                )
+            else:
+                self.ect_config = ECTConfig(
+                    ect_type=self.ect_type,
+                    resolution=self.ect_resolution,
+                    scale=self.ect_scale,
+                    radius=self.ect_radius,
+                    normalized=self.ect_normalize_after,
+                    fixed=not self.learn_directions,
+                )
+                self.ect_layer = torch.nn.ModuleList(
+                    [
+                        ECTLayer(self.ect_config, v=self.ect_directions)
+                        for _ in self.ect_hops
+                    ]
+                )
 
         if self.use_pos_enc:
             self.num_feat_1st_layer += self.pos_enc_embed_dim
@@ -146,7 +168,7 @@ class BaseGraphModel(nn.Module, ABC):
                 else:
                     coords4ect = x.clone()
 
-            # Compute the l-ECT on the appropaite features
+            # Compute the l-ECT on the appropriate features
             ect_features = self._compute_lect_batch_wise(coords4ect, e_index, **kwargs)
 
             # Project the l-ECT
