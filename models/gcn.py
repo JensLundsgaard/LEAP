@@ -24,7 +24,7 @@ class MyGNN(BaseGraphModel):
 
 		if self.learnable_pe:
 			self.learned_pe_dim = kwargs.get("learned_pe_dim", 5)
-			self.pe_convs = self.pe_convs = torch.nn.ModuleList()
+			self.pe_convs = torch.nn.ModuleList()
 			
 			# Learnable PE Layers
 			self.pe_convs.append(Conv(self.num_feat_1st_layer - in_channels, self.learned_pe_dim))

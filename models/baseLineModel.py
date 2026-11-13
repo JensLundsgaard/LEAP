@@ -80,6 +80,14 @@ class BaseLineModel(torch.nn.Module):
                 num_layers=num_layers,
                 **kwargs,
             )
+        elif model_name == "GCNclECT":
+            self.model = GCNclECT(
+                in_channels=input_dim,
+                hidden_channels=hidden_dim,
+                out_channels=num_classes,
+                num_layers=num_layers,
+                **kwargs,
+            )
         else:
             raise ValueError(f"Unknown model name: {model_name}")
         self.name = model_name
@@ -89,7 +97,8 @@ class BaseLineModel(torch.nn.Module):
     def forward(self, data):
         if self.name == "SYN":
             return torch.nn.functional.log_softmax(self.model(data), dim=-1)
-        
+        elif self.name == "GCNwithclECTallSteps":
+            return torch.nn.functional.log_softmax(self.model(data), dim=-1)
         x, e_index = data.x, data.edge_index
         x_ect = None
         if self.embedding_layers is not None:
