@@ -51,25 +51,28 @@ class GNNclECT(nn.Module):
             for _ in range(num_layers-1):
                 self.mlps.append(nn.Identity())
 
+
         self.mlps.append(nn.Identity())
         
         self.pe_encoders = nn.ModuleList()
         for _ in range(num_layers-1):
-            self.pe_encoders.append()
+            self.pe_encoders.append(lcECTLayer(self.hidden_dim, self.pe_dim))
+        
+        
         self.mlp = nn.Sequential(nn.Linear(out_channels, out_channels), nn.ReLU, nn.Linear(out_channels, out_channels)) # classify
 
-        
+        self.num_layers = num_layers 
 
 	def forward(self, data, **kwargs):
         x, e_index = data.x, data.edge_index
-		# Handle computation of ECT/PE, projections, concatenation etc.
-		x = self._common_initial_forward(x, e_index, **kwargs)
+
+
+        for i in range(self.num_layers -1):
+            x = self.convs[i](x, e_index) + x
+            x = self.
+            x = self.mlps[i]
+        return x
 	
-		# pass through the GCN layers
-        self._apply_convs_with_clECT(x, e_index)
-
-		return self._apply_convs(x, e_index)
-
     def _apply_convs_with_clECT(self, x, e_index, **kwargs):
         return x
 
