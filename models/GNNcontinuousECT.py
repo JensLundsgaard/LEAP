@@ -36,9 +36,9 @@ class GNNclECT(nn.Module):
         self.conv_name = conv_name
     
 		self.convs = nn.ModuleList()
-			
+		self.mlp_in = self.Sequential(self.Linear(self.num_feat_1st_layer, self.hidden_dim - self.pe_dim), nn.ReLU()) # project
 		# Graph Conv Layers
-		self.convs.append(Conv(self.num_feat_1st_layer, hidden_channels - self.pe_dim))
+		self.convs.append(Conv(hidden_channels, hidden_channels - self.pe_dim))
 		for _ in range(num_layers - 2):
 			self.convs.append(Conv(hidden_channels, hidden_channels - self.pe_dim))
 		self.convs.append(Conv(hidden_channels, out_channels))
@@ -57,20 +57,25 @@ class GNNclECT(nn.Module):
         self.pe_encoders = nn.ModuleList()
         for _ in range(num_layers-1):
             self.pe_encoders.append(lcECTLayer(self.hidden_dim, self.pe_dim))
+            
         
         
-        self.mlp = nn.Sequential(nn.Linear(out_channels, out_channels), nn.ReLU, nn.Linear(out_channels, out_channels)) # classify
+        self.out_mlp = nn.Sequential(nn.Linear(out_channels, out_channels), nn.ReLU, nn.Linear(out_channels, out_channels)) # classify
 
         self.num_layers = num_layers 
 
 	def forward(self, data, **kwargs):
         x, e_index = data.x, data.edge_index
-
+        
+        bfs_e_index = self._build_bfs_nbhds(e_index) # should this
+        
 
         for i in range(self.num_layers -1):
-            x = self.convs[i](x, e_index) + x
-            x = self.
-            x = self.mlps[i]
+            x = self.convs[i](x, e_index)
+            x_pe = self.pe_encoders(x, e_index, bfs_e_index)
+            x = torch.cat([x, x_pe], dim=-1)
+            x = self.mlps[i](x)
+        x =  
         return x
 	
     def _apply_convs_with_clECT(self, x, e_index, **kwargs):
