@@ -9,24 +9,54 @@ import torch.nn.functional as F
 
 from utils.utility import ECTembedMethod, ECTtype, build_neigh_batch, maxL2_graph_norm
 
-def get_k_bfs_subgraphs(num_nodes, edge_index, k): 
+
+@torch.no_grad() # no gradient is induced here, all operations are discrete
+def get_k_bfs_subgraphs(num_nodes, edge_index, k, rng=torch.Generator().manual_seed(42)): 
     """
     num_nodes: int | obsvious;
     edge_index: 2, E | obvious;
     k: int| the output neighborhood size;
     
     expectation: size(smallest_connected_component(V,E)) <= k | behavior is undefined if not 
+
+    returns:
+        neighborhoods: num_nodes, K
+        subgraph_edges: list | len = num_nodes, each edge_index tensor index the respective tensor in neighborhoods        
     """
     
     device = edge_index.device
  
-    self_loops = torch.arange(num_nodes, device=device).repeat(2, 1)
+    self_loops = torch.arange(num_nodes, device=device)[None,:].repeat(2, 1)
     adj_edges = torch.cat([edge_index, self_loops], dim=1)
     values = torch.ones(adj_edges.size(1), device=device)
     adj = torch.sparse_coo_tensor(adj_edges, values, (num_nodes, num_nodes)).coalesce()
-    #return neighborhoods, subgraph_edges
+    visited = torch.eye(num_nodes, dtype=torch.bool, device=device)
+    # save distances, set dist to max distances for later topk
+    hop_dist = torch.full((num_nodes, num_nodes), k, dtype=torch.long, device=device)
+    hop_dist.fill_diagonal_(0)
+    frontier = visited.float()
+    for i in range(k):
+        reach = torch.sparse.mm(adj, frontier.t()).t() > 0
+        newly_reached = reach & ~visited
+        if not newly_reached.any():
+            break
+        hop_dist[newly_reached] = i+1
+        visited |= newly_reached 
+        frontier = visited.float()
+    hop_dist = hop_dist.float() + torch.randn(size=hop_dist.shape, device=device, generator=rng) * 0.1
+        
+    neighborhoods = torch.topk(hop_dist, k, dim=1, largest=False).indices # topk not being determistic is good, if we want to be truely random we can add a sufficently small random matrix to break ties randomly
+    # produce each mask 
+    edge_mask = ((neighborhoods[: ,None, :] == edge_index[0][None, :, None]) & (neighborhoods[:, None, :] == edge_index[1][None, :, None])).any(dim=2)
+    subgraph_edges = [edge_index[:, edge_mask[i]] for i in range(num_nodes)]
 
-    return torch.empty(num_nodes, k), []
+    # new reindex so that each edge_index actually indexes it's nbh rather than the original [num_nodes]
+
+    #reindex_dicts = # todo make a torch.gather or sparse gather or smth
+        
+    
+    return neighborhoods, subgraph_edges
+    
 
 
 
@@ -75,28 +105,28 @@ class lcECTLayer(nn.Module):
         super(lcECTLayer, self).__init__() # add pe size to num_layers???
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.mlp_project = nn.Linear(2, out_channels)
+        self.mlp_project = nn.Sequential(nn.Linear(2, out_channels), nn.ReLU)
         self.include_dir_mlp = nn.Linear(out_channels + in_channels, out_channels)
+        self.keys = nn.Linear(out_channels, out_channels)
+        self.queries = nn.Linear(out_channels, out_channels)
+        self.values = nn.Linear(out_channels, out_channels)
   
-    def forward(self, x, v, e_index, bfs_index, edge_sets):
+    def forward(self, x, v, e_index, bfs_index, subgraph_e_indices):
         # x: num_nodes, D | ;
         # v : D, num_dirs | ;
         # e_index: 2, E | torch geometric;
         # bfs_index: num_nodes, k |;
-        # edge_subsets: List[tensor] | for all subset in edge_subsets, subset.shape==2,E_subset, where E_subset <= E
+        # subgraph_edge_indices: List[tensor] | for all subset in subgraph_edge_indices, subset.shape==2,E_subset, where E_subset <= E where the actual values index the positions of nodes in bfs_index
         
         # new x 
         bfs_batches = torch.arange(bfs_index.shape[0],device=bfs_index)[:, None].broadcast_to(bfs_index.shape)
         bfs_batches_flat = bfs_batches.flatten() # num_nodes * k
         bfs_index_flat = bfs_index.flatten()
 
-        # E, num_nodes, k
-        
-        bfs_edge_index = torch.gather(e_index, 1, bfs_edge_to_node_index[0][None,:].expand(2,-1)) # bfs_edge_index[i,j] = edge_index[i][bfs_index_edge_to_node_index[i][j]] # now this is all valid edges, now we just need to make it respect the order of x_bfs
-
-        
-
-           
+        # need a partial injective function from [num_nodes]^2 \to [num_bfs_nodes], defined at (n_1, n_2) if n_2 in bfs_index[n_1]
+        bfs_index_to_all_bfs_node = bfs_index + bfs_batches * bfs_index.shape[1] # 
+        bfs_e_index = torch.cat([torch.gather(bfs_index_to_all_bfs_node[i][None, :].expand(2, -1), 0, subgraph_e_index) for subgraph_e_index in subgraph_e_indices], dim=1)
+    
         bfs_x = torch.gather(x, 0, bfs_index_flat[:, None].expand(-1, x.shape[1])) # bfs_x[i, j] = x[bfs_index[i][j]][j] # num_nodes * k, D
          
         """Continuous delta ECT for graphs.
@@ -116,17 +146,31 @@ class lcECTLayer(nn.Module):
             Row 1: ECT delta (delta = #vertices - #edges + #faces attributed to this node)
             Nodes with delta == 0 in all directions are masked out.
         """
-        list_ect_reps = compute_continuous_delta_ect_edges(bfs_x, flattened_bfs, v, index=bfs_batches)
-        # add F.pad below # TODO remove F.pad and make pad work with above function
-        max_dim = max() 
+        list_ect_reps = compute_continuous_delta_ect_edges(bfs_x, bfs_e_index, v, index=bfs_batches_flat)
+
+        # add F.pad below # TODO: remove F.pad and make padding work with function
+        N_active_sizes = torch.tensor([ect_reps.shape[1] for ect_reps in list_ect_reps], device = bfs_x.device)
+        
+        max_dim = N_active_sizes.max().item()
+        mask = N_active_sizes[:, None] < torch.arange(max_dim, device=N_active_sizes.device)[None, :] # B, N_padded
         padded_list_ect_reps = [F.pad(ect_reps, (0,0, 0,max_dim-ect_reps.shape[1], 0,0), mode="constant", values=0.0) for ect_reps in list_ect_reps]
 
         padded_ect_reps = torch.stack(padded_list_ect_reps, dim=0)
         # then we need to turn (num_nodes, 2, N_padded_active, num_dirs) into num_nodes, out_channels
-        masked_attended = attend(self.keys(padded_ect_reps), self.queries(padded_ect_reps), self.values(padded_ect_reps), mask=mask) # num_nodes,N_padded, num_dirs, out_channels
-        x_pe = (mask_attended * mask).log().sum(dim=1).exp() # num_nodes, num_dirs, out_channels
+        padded_ect_reps = padded_ect_reps.movedim(1,3)
+        padded_ect_reps = padded_ect_reps.move_dim(1,2)
+        tokens = self.mlp_project(padded_ect_reps)
+
+        # TODO: move this out at some point 
+        masked_attended = F.scaled_dot_product_attention(self.queries(padded_ect_reps), self.keys(padded_ect_reps), self.values(padded_ect_reps), attn_mask=mask[:,None,:,None] & mask[:, None, None, :]) # num_nodes,N_padded, num_dirs, out_channels
         
-        x_pe 
+        x_pe = (mask_attended * mask[:,:,None,None]).exp().sum(dim=1).log() # num_nodes, num_dirs, out_channels
+        x_pe_dirs = torch.cat([x_pe, v[None,:,:].expand(x_pe.shape[0],-1,-1)])
+        
+        x_pe_dir_aware = self.include_dir_mlp(x_pe_dirs) # num_nodes, num_dirs, out_channels
+        
+        x_pe = x_pe_dir_aware.exp().sum(dim=1).log()
+            
         return x_pe
          
    
