@@ -105,27 +105,21 @@ class BaseGraphModel(nn.Module, ABC):
             self._print(
                 f'l-ECT directions are {"learnable" if self.learn_directions else "fixed"}'
             )
-            if self.use_c_ect:
-                self.ect_layer = torch.nn.ModuleList(
-                    [
-                        ContinuousECTWrapper() for _ in self.ect_hops
-                    ]
-                )
-            else:
-                self.ect_config = ECTConfig(
-                    ect_type=self.ect_type,
-                    resolution=self.ect_resolution,
-                    scale=self.ect_scale,
-                    radius=self.ect_radius,
-                    normalized=self.ect_normalize_after,
-                    fixed=not self.learn_directions,
-                )
-                self.ect_layer = torch.nn.ModuleList(
-                    [
-                        ECTLayer(self.ect_config, v=self.ect_directions)
-                        for _ in self.ect_hops
-                    ]
-                )
+                
+            self.ect_config = ECTConfig(
+                ect_type=self.ect_type,
+                resolution=self.ect_resolution,
+                scale=self.ect_scale,
+                radius=self.ect_radius,
+                normalized=self.ect_normalize_after,
+                fixed=not self.learn_directions,
+            )
+            self.ect_layer = torch.nn.ModuleList(
+                [
+                    ECTLayer(self.ect_config, v=self.ect_directions)
+                    for _ in self.ect_hops
+                ]
+            )
 
         if self.use_pos_enc:
             self.num_feat_1st_layer += self.pos_enc_embed_dim
