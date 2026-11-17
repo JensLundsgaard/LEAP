@@ -51,9 +51,13 @@ def get_k_bfs_subgraphs(num_nodes, edge_index, k, rng=torch.Generator().manual_s
     subgraph_edges = [edge_index[:, edge_mask[i]] for i in range(num_nodes)]
 
     # new reindex so that each edge_index actually indexes it's nbh rather than the original [num_nodes]
-
-    #reindex_dicts = # todo make a torch.gather or sparse gather or smth
-        
+    # we can use a sparse tensor of neighborhoods to build an index, which we gather onto the edge index so that are e_indices index the right thing`
+    values = torch.arange(k, device=device)[None, :].expand(num_nodes, -1)
+    dim0_index = torch.arange(num_nodes, device=device)[:, None].expand(-1, k)
+    nbh_indices = torch.stack([num_nodes, neighborhoods],dim=-1).reshape(-1, 2).T
+    nbh_index_sparse = torch.sparse_coo_tensor(nbh_indices, values=values.flatten(), (num_nodes, num_nodes), device=device).coalesce().to_dense() # since spatial is already O(num_nodes**2) we can simply make this dense
+    
+    subgraph_edges = [torch.gather(nbh_index_sparse[i][None,:].expand(2,-1),1,e_i) for i,e_i in enumerate(subgraph_edges)] 
     
     return neighborhoods, subgraph_edges
     
