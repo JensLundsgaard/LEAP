@@ -4,6 +4,13 @@ from torch import nn
 from utils.continuous_delta_ect import compute_continuous_delta_ect_edges
 import torch_geometric
 # todo get direction init for learned directions
+dect.directions.generate_uniform_directions(
+            num_thetas=config.num_thetas,
+            d=dim if not config.ect_on_pe else config.pos_enc_embed_dim,
+            seed=config.ect_seed,
+            device=accelerator,
+        )
+
         
 import torch.nn.functional as F
 
