@@ -9,9 +9,6 @@ import torch.nn.functional as F
 
 from utils.utility import ECTembedMethod, ECTtype, build_neigh_batch, maxL2_graph_norm
 
-
-
-
 @torch.no_grad() # no gradient is induced here, all operations are discrete
 def get_k_bfs_subgraphs(num_nodes, edge_index, k, rng=torch.Generator().manual_seed(42)): 
     """
@@ -67,45 +64,6 @@ def get_k_bfs_subgraphs(num_nodes, edge_index, k, rng=torch.Generator().manual_s
 
 
 
-# Begin Credit: Nello Blaser from Encoding the Euler Characteristic by Blaser et al. 
-def _responsible_counts(simplex_idx, nh_b, N_b, nd):
-    """Scatter simplex attributions: each simplex goes to its max-projection node."""
-    k, M = simplex_idx.shape
-    h    = nh_b[simplex_idx]                                        # (k, M, nd)
-    am   = h.argmax(dim=0)                                          # (M, nd)
-    si_T = simplex_idx.T.unsqueeze(-1).expand(M, k, nd)            # (M, k, nd)
-    resp = si_T.gather(1, am.unsqueeze(1)).squeeze(1)              # (M, nd)
-
-    d_idx = torch.arange(nd, device=device).unsqueeze(0).expand(M, nd)
-    flat  = resp * nd + d_idx
-    counts = torch.zeros(N_b * nd, device=device)
-    counts.scatter_add_(0, flat.flatten(), torch.ones(M * nd, device=device))
-    return counts.view(N_b, nd)
-
-def _single(nh_b, ei_b, N_b, fi_b):
-    nd = nh_b.shape[1]
-
-    ecounts = _responsible_counts(ei_b, nh_b, N_b, nd) if ei_b.shape[1] > 0 \
-              else torch.zeros(N_b, nd, device=device)
-    fcounts = _responsible_counts(fi_b, nh_b, N_b, nd) if fi_b is not None and fi_b.shape[1] > 0 \
-              else torch.zeros(N_b, nd, device=device)
-
-    delta = torch.ones(N_b, nd, device=device) - ecounts + fcounts  # (N_b, nd)
-
-    # Mask: keep only nodes with non-zero ECT change in at least one direction
-    keep    = (delta != 0).any(dim=1)                               # (N_b,)
-    nh_k    = nh_b[keep]
-    delta_k = delta[keep]
-
-    result = torch.stack([nh_k, delta_k])                           # (2, N_keep, nd)
-
-    if sort:
-        _, sidx = nh_k.sort(dim=0)
-        result = result.gather(1, sidx.unsqueeze(0).expand_as(result))
-    return result
-# End Credit
-
-
 
 class lcECTLayer(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -132,7 +90,7 @@ class lcECTLayer(nn.Module):
 
         # need a partial injective function from [num_nodes]^2 \to [num_bfs_nodes], defined at (n_1, n_2) if n_2 in bfs_index[n_1]
         bfs_index_to_all_bfs_node = bfs_index + bfs_batches * bfs_index.shape[1] # 
-        bfs_e_index = torch.cat([torch.gather(bfs_index_to_all_bfs_node[i][None, :].expand(2, -1), 0, subgraph_e_index) for subgraph_e_index in subgraph_e_indices], dim=1)
+        bfs_e_index = torch.cat([torch.gather(bfs_index_to_all_bfs_node[i][None, :].expand(2, -1), 0, subgraph_e_index) for i, subgraph_e_index in enumerate(subgraph_e_indices)], dim=1)
     
         bfs_x = torch.gather(x, 0, bfs_index_flat[:, None].expand(-1, x.shape[1])) # bfs_x[i, j] = x[bfs_index[i][j]][j] # num_nodes * k, D
          
@@ -169,7 +127,7 @@ class lcECTLayer(nn.Module):
         tokens = self.mlp_project(padded_ect_reps)
 
         # TODO: move this out at some point 
-        masked_attended = F.scaled_dot_product_attention(self.queries(padded_ect_reps), self.keys(padded_ect_reps), self.values(padded_ect_reps), attn_mask=mask[:,None,:,None] & mask[:, None, None, :]) # num_nodes,N_padded, num_dirs, out_channels
+        mask_attended = F.scaled_dot_product_attention(self.queries(padded_ect_reps), self.keys(padded_ect_reps), self.values(padded_ect_reps), attn_mask=mask[:,None,:,None] & mask[:, None, None, :]) # num_nodes,N_padded, num_dirs, out_channels
         
         x_pe = (mask_attended * mask[:,:,None,None]).exp().sum(dim=1).log() # num_nodes, num_dirs, out_channels
         x_pe_dirs = torch.cat([x_pe, v[None,:,:].expand(x_pe.shape[0],-1,-1)])
@@ -190,15 +148,10 @@ class GNNclECT(nn.Module):
     I will try to take a look at the other wrapper since I'm still not sure what the whole flow of information, for now I am just trying to make a proof of concept work
     - Jens Lundsgaard
     """
-    def __init__(self,
-        in_channels,
-		out_channels,
-		hidden_channels,
-		num_layers,
-		conv_name="GCNConv",
-		**kwargs):
+    def __init__(self, in_channels, out_channels, hidden_channels, num_layers, conv_name="GCNConv", **kwargs):
+
         super(GNNclECT, self).__init__() # add pe size to num_layers???
-        for arg, val in kwargs.items()
+        for arg, val in kwargs.items():
             setattr(self, arg, val)
         
         if conv_name == "GCNConv":
@@ -209,16 +162,16 @@ class GNNclECT(nn.Module):
             Conv = lambda in_size, out_size : torch_geometric.nn.GINConv(nn.Sequential(nn.Linear(in_size, out_size),nn.ReLU()))
         else: 
             raise ValueError("select valid GNN") 
-
+        
         self.conv_name = conv_name
-    
-		self.convs = nn.ModuleList()
-		self.mlp_in = self.Sequential(self.Linear(self.num_feat_1st_layer, self.hidden_dim - self.pe_dim), nn.ReLU()) # project
-		# Graph Conv Layers
-		self.convs.append(Conv(hidden_channels, hidden_channels - self.pe_dim))
-		for _ in range(num_layers - 2):
-			self.convs.append(Conv(hidden_channels, hidden_channels - self.pe_dim))
-		self.convs.append(Conv(hidden_channels, out_channels))
+        self.convs = nn.ModuleList()
+        self.mlp_in = self.Sequential(self.Linear(self.num_feat_1st_layer, self.hidden_dim - self.pe_dim), nn.ReLU()) # project
+
+        # Graph Conv Layers
+        self.convs.append(Conv(hidden_channels, hidden_channels - self.pe_dim))
+        for _ in range(num_layers - 2):
+            self.convs.append(Conv(hidden_channels, hidden_channels - self.pe_dim))
+        self.convs.append(Conv(hidden_channels, out_channels))
 
         self.mlps = nn.ModuleList()
         if self.conv_name != "GINConv": # gin conv already has an MlP
@@ -227,24 +180,22 @@ class GNNclECT(nn.Module):
         else:
             for _ in range(num_layers-1):
                 self.mlps.append(nn.Identity())
-
-
-        self.mlps.append(nn.Identity())
         
+        
+        self.mlps.append(nn.Identity())
+
         self.pe_encoders = nn.ModuleList()
         for _ in range(num_layers-1):
             self.pe_encoders.append(lcECTLayer(self.hidden_dim-self.pe_dim, self.pe_dim))
-            
-        
-        
-        self.out_mlp = nn.Sequential(nn.Linear(out_channels, out_channels), nn.ReLU, nn.Linear(out_channels, out_channels)) # classify
+
+        self.out_mlp = nn.Sequential(nn.Linear(out_channels, out_channels), nn.ReLU(), nn.Linear(out_channels, out_channels)) # classify
 
         self.num_layers = num_layers 
         self.v = torch.tensor(directions_init(), requires_grad=self.learn_directions)
 
-	def forward(self, data, **kwargs):
+    def forward(self, data, **kwargs): 
         x, e_index = data.x, data.edge_index
-        
+
         bfs_e_index = self._build_bfs_nbhds(e_index, k=self.k) # this could also happen in the dataloader for efficiency for now it can stay though
         x = self.mpl_in(x) 
 
@@ -259,8 +210,4 @@ class GNNclECT(nn.Module):
         x = self.convs[-1](x, e_index)
         x = self.out_mlp(x)
         return x
-	
-    def _build_bfs_nbhds(self, e_index, k=16):
-         
-        return 
 
