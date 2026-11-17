@@ -4,12 +4,7 @@ from torch import nn
 from utils.continuous_delta_ect import compute_continuous_delta_ect_edges
 import torch_geometric
 # todo get direction init for learned directions
-dect.directions.generate_uniform_directions(
-            num_thetas=config.num_thetas,
-            d=dim if not config.ect_on_pe else config.pos_enc_embed_dim,
-            seed=config.ect_seed,
-            device=accelerator,
-        )
+from dect.directions import generate_uniform_directions
 
         
 import torch.nn.functional as F
@@ -198,7 +193,11 @@ class GNNclECT(nn.Module):
         self.out_mlp = nn.Sequential(nn.Linear(out_channels, out_channels), nn.ReLU(), nn.Linear(out_channels, out_channels)) # classify
 
         self.num_layers = num_layers 
-        self.v = torch.tensor(directions_init(), requires_grad=self.learn_directions)
+        self.v = torch.tensor(generate_uniform_directions(
+            num_thetas=self.num_thetas,
+            d=self.pos_enc_embed_dim,
+            seed=42,
+        ), requires_grad=self.learn_directions)
 
     def forward(self, data, **kwargs): 
         x, e_index = data.x, data.edge_index
