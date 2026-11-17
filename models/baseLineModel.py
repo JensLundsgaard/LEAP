@@ -4,6 +4,8 @@ from models.gcn import MyGNN
 from models.gCNwithLECTallSteps import GCNwithLECTallSteps
 from models.noMP import NoMP
 from models.baseSyntheticModel import BaseSyntheticModel
+from models.GNNContinuousECT import GNNclECT
+
 
 class BaseLineModel(torch.nn.Module):
     def __init__(
@@ -80,8 +82,8 @@ class BaseLineModel(torch.nn.Module):
                 num_layers=num_layers,
                 **kwargs,
             )
-        elif model_name == "GCNclECT":
-            self.model = GCNclECT(
+        elif model_name == "GNNclECT":
+            self.model = GNNclECT(
                 in_channels=input_dim,
                 hidden_channels=hidden_dim,
                 out_channels=num_classes,

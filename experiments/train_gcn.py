@@ -85,6 +85,7 @@ def training_pipeline(**kwargs):
         num_classes=dataset.num_classes,
         ect_directions=ect_directions,
         regression=dataset.is_regression,
+
         **params_dict,
     )
 
