@@ -4,7 +4,7 @@ from models.gcn import MyGNN
 from models.gCNwithLECTallSteps import GCNwithLECTallSteps
 from models.noMP import NoMP
 from models.baseSyntheticModel import BaseSyntheticModel
-from models.GNNContinuousECT import GNNclECT
+from models.GNNcontinuousECT import GNNclECT
 
 
 class BaseLineModel(torch.nn.Module):
