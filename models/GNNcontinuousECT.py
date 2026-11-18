@@ -91,7 +91,7 @@ class lcECTLayer(nn.Module):
         bfs_index_flat = bfs_index.flatten()
 
         # need a partial injective function from [num_nodes]^2 \to [num_bfs_nodes], defined at (n_1, n_2) if n_2 in bfs_index[n_1]
-        bfs_index_to_all_bfs_node = bfs_index + bfs_batches * bfs_index.shape[1] #
+        bfs_index_to_all_bfs_node = torch.arange(bfs_index.shape[0] * bfs_index.shape[1],device=bfs_index.device).reshape(*bfs_index.shape) #bfs_index + bfs_batches * bfs_batches.shape[1] #
         subgraph_tensors = [torch.gather(bfs_index_to_all_bfs_node[i][None, :].expand(2, -1), 1, subgraph_e_index) for i, subgraph_e_index in enumerate(subgraph_e_indices)]
 
         bfs_e_index = torch.cat(subgraph_tensors, dim=1)

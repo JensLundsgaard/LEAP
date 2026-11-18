@@ -17,3 +17,6 @@ ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
 RUN pip install --no-cache-dir -r requirements.txt \
       -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
+
+RUN apt-get -y update && apt-get -y install vim
+
