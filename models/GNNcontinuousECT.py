@@ -1,5 +1,4 @@
 import torch
-from baseGraphModel import BaseGraphModel
 from torch import nn
 from utils.continuous_delta_ect import compute_continuous_delta_ect_edges
 import torch_geometric

@@ -21,7 +21,6 @@ index via ``argmax``).
 """
 
 import torch
-from cubical_ect import image_to_cubical_complex
 
 
 def compute_continuous_delta_ect_edges(
@@ -109,78 +108,6 @@ def compute_continuous_delta_ect_edges(
 
         nh_b = nh[node_mask]
         results.append(_single(nh_b, sub_ei, nh_b.shape[0], sub_fi))
-    return results
-
-
-def compute_continuous_delta_ect_cubical_batch(
-    images: torch.Tensor,
-    threshold: float,
-    v: torch.Tensor,
-    sort: bool = True,
-) -> list:
-    """Continuous delta ECT for cubical complexes (binary images).
-
-    Args:
-        images:    Grayscale images [B, H, W], values in [0, 1].
-        threshold: Binarization threshold (pixels >= threshold are foreground).
-        v:         Direction matrix [2, num_dirs].
-        sort:      If True, sort nodes by ascending threshold per direction.
-
-    Returns:
-        List of B tensors, each of shape [2, N_i_active, num_dirs].
-        Row 0: filtration threshold (projection of the node)
-        Row 1: ECT delta (delta = #vertices - #edges + #faces attributed to this node)
-        Nodes with delta == 0 in all directions are masked out.
-    """
-    num_dirs = v.shape[1]
-    results  = []
-
-    for i in range(images.shape[0]):
-        mask = images[i] >= threshold
-        cx   = image_to_cubical_complex(mask)
-        x, edges, squares = cx["x"], cx["edges"], cx["squares"]
-        N = x.shape[0]
-
-        if N == 0:
-            results.append(torch.zeros(2, 0, num_dirs, device=v.device))
-            continue
-
-        nh  = x @ v   # (N, num_dirs)
-        dev = nh.device
-
-        def _responsible(simplex_idx):
-            k, M  = simplex_idx.shape
-            h     = nh[simplex_idx]                                      # (k, M, num_dirs)
-            am    = h.argmax(dim=0)                                      # (M, num_dirs)
-            idx_T = simplex_idx.T.unsqueeze(-1).expand(M, k, num_dirs)  # (M, k, num_dirs)
-            return idx_T.gather(1, am.unsqueeze(1)).squeeze(1)          # (M, num_dirs)
-
-        def _counts(resp, M):
-            d_idx = torch.arange(num_dirs, device=dev).unsqueeze(0).expand(M, num_dirs)
-            flat  = resp * num_dirs + d_idx
-            c     = torch.zeros(N * num_dirs, device=dev)
-            c.scatter_add_(0, flat.flatten(), torch.ones(M * num_dirs, device=dev))
-            return c.view(N, num_dirs)
-
-        E, S    = edges.shape[1], squares.shape[1]
-        ecounts = _counts(_responsible(edges),   E) if E > 0 else torch.zeros(N, num_dirs, device=dev)
-        fcounts = _counts(_responsible(squares), S) if S > 0 else torch.zeros(N, num_dirs, device=dev)
-
-        delta = torch.ones(N, num_dirs, device=dev) - ecounts + fcounts  # (N, num_dirs)
-
-        # Mask: keep only nodes with non-zero ECT change in at least one direction
-        keep    = (delta != 0).any(dim=1)                                # (N,)
-        nh_k    = nh[keep]
-        delta_k = delta[keep]
-
-        result = torch.stack([nh_k, delta_k])                            # (2, N_keep, num_dirs)
-
-        if sort:
-            _, sidx = nh_k.sort(dim=0)                                   # (N_keep, num_dirs)
-            result  = result.gather(1, sidx.unsqueeze(0).expand_as(result))
-
-        results.append(result)
-
     return results
 
 
