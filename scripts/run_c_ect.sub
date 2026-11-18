@@ -1,7 +1,7 @@
 # run_c_ect.sub
 # run the main LEAP experiments from the paper as a baseline for comparison with continuous ECT (Blaser et al.)
 
-docker_image = jenslundsgaard/leap_c_ect:v1.1
+docker_image = jenslundsgaard/leap_c_ect:v1.2
 
 universe = docker
 
