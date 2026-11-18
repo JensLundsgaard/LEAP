@@ -6,7 +6,6 @@ import torch_geometric
 from dect.directions import generate_uniform_directions
 from torch_geometric.nn import global_mean_pool
 
-
 import torch.nn.functional as F
 
 from utils.utility import ECTembedMethod, ECTtype, build_neigh_batch, maxL2_graph_norm
@@ -124,19 +123,20 @@ class lcECTLayer(nn.Module):
 
         max_dim = N_active_sizes.max().item()
         mask = N_active_sizes[:, None] < torch.arange(max_dim, device=N_active_sizes.device)[None, :] # B, N_padded
-        padded_list_ect_reps = [F.pad(ect_reps, (0,0, 0,max_dim-ect_reps.shape[1], 0,0), mode="constant", values=0.0) for ect_reps in list_ect_reps]
+        padded_list_ect_reps = [F.pad(ect_reps, (0,0, 0,max_dim-ect_reps.shape[1], 0,0), mode="constant", value=0.0) for ect_reps in list_ect_reps]
 
         padded_ect_reps = torch.stack(padded_list_ect_reps, dim=0)
         # then we need to turn (num_nodes, 2, N_padded_active, num_dirs) into num_nodes, out_channels
         padded_ect_reps = padded_ect_reps.movedim(1,3)
-        padded_ect_reps = padded_ect_reps.move_dim(1,2)
+        padded_ect_reps = padded_ect_reps.movedim(1,2)
         tokens = self.mlp_project(padded_ect_reps)
 
-        # TODO: move this out at some point
-        mask_attended = F.scaled_dot_product_attention(self.queries(padded_ect_reps), self.keys(padded_ect_reps), self.values(padded_ect_reps), attn_mask=mask[:,None,:,None] & mask[:, None, None, :]) # num_nodes,N_padded, num_dirs, out_channels
 
-        x_pe = (mask_attended * mask[:,:,None,None]).exp().sum(dim=1).log() # num_nodes, num_dirs, out_channels
-        x_pe_dirs = torch.cat([x_pe, v[None,:,:].expand(x_pe.shape[0],-1,-1)])
+        # TODO: move this out at some point
+        mask_attended = F.scaled_dot_product_attention(self.queries(tokens), self.keys(tokens), self.values(tokens), attn_mask=mask[:,None,:,None] & mask[:, None, None, :]) # num_nodes,N_padded, num_dirs, out_channels
+        x_pe = (mask_attended * mask[:,None,:,None]).exp().sum(dim=2).log() # num_nodes, num_dirs, out_channels
+
+        x_pe_dirs = torch.cat([x_pe, v.movedim(0,1)[None,:,:].expand(x_pe.shape[0],-1,-1)], dim=-1)
 
         x_pe_dir_aware = self.include_dir_mlp(x_pe_dirs) # num_nodes, num_dirs, out_channels
 
@@ -158,7 +158,6 @@ class GNNclECT(nn.Module):
 
         super(GNNclECT, self).__init__() # add pe size to num_layers???
         for arg, val in kwargs.items():
-            print(arg)
             setattr(self, arg, val)
 
         if conv_name == "GCNConv":
@@ -205,12 +204,13 @@ class GNNclECT(nn.Module):
         ), requires_grad=self.learn_directions)
         if self.learn_directions:
             self.v = nn.Parameter(self.v)
-        self.k = 16
+        self.k = 3
         self.rng = torch.Generator(device="cuda").manual_seed(42)
+        self.out_channels = out_channels
 
     def forward(self, data, **kwargs):
         x, e_index = data.x, data.edge_index
-        bfs_e_index, subgraphs  = get_k_bfs_subgraphs(x.shape[0], e_index, self.k, rng=self.rng) # this could also happen in the dataloader for efficiency for now it can stay though
+        bfs_e_index, subgraphs = get_k_bfs_subgraphs(x.shape[0], e_index, min(self.k, *[d.x.shape[0] for d in data.to_data_list()]), rng=self.rng) # this could also happen in the dataloader for efficiency for now it can stay though
         x = self.mlp_in(x)
 
         for i in range(self.num_layers -1):
@@ -219,7 +219,7 @@ class GNNclECT(nn.Module):
             x = self.mlps[i](x)
             x = self.convs[i](x, e_index)
 
-        x_pe = self.pe_encoders[-1](x, self.v, e_index, self.v, bfs_e_index, subgraphs)
+        x_pe = self.pe_encoders[-1](x, self.v, e_index, bfs_e_index, subgraphs)
         x = torch.cat([x, x_pe], dim=-1)
         x = self.convs[-1](x, e_index)
         x = self.out_mlp(x)
